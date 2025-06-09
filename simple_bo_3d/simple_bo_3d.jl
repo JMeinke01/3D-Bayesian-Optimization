@@ -1,4 +1,4 @@
-using Plots; # pyplot()
+using Plots;
 
 include("helper_fncs.jl")
 include("test_fncs.jl")
