@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # simple-2d-bayesian-opt
 **DEPENDENCIES: Measures.jl, Plots.jl, Distributions.jl, GaussianProcesses.jl, LaTeXStrings.jl**
 
@@ -7,3 +8,6 @@ File Modifications: To expand the domain of the function, find the 'x' variable 
 
 
 ![example_output](https://github.com/user-attachments/assets/5fc8bc7a-4316-4f2e-ac3c-96521c1044ea)
+=======
+# 3D-Bayesian-Optimization
+>>>>>>> 3a4a81ecc37e1a699c3b51cd43857a37f3f8df0e
