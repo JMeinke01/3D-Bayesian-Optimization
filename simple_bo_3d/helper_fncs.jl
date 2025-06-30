@@ -14,7 +14,7 @@ struct gp
     σ       # Standard deviation
     Κ_ss    # Covariance matrix of the test set
     Κ_xx    # Covariance matrix of the observed data/training points represented as a tuple with a view variable
-    Κ_cross # Covariance matrix of the observed data points and the total data set represented as a tuple with a view variable
+    Κ_xs    # Covariance matrix of the observed data points and the total data set represented as a tuple with a view variable
 end
 
 # Given a list of possible sample points, 'X', the number of samples wanted, 'samples',
@@ -108,25 +108,25 @@ end
 
 # Creates a zero mean function that returns 0 for all values
 function mean_zero()
-    function m(x1, x2)
-        return 0
+    function m(X::Matrix{Float64})
+        return zeros(size(X, 1), 1)
     end
     return m
 end
 
 # Creates a constant mean function which returns the constant β for all values
 function mean_constant(β::Real)
-    function m(x1, x2)
-        return β
+    function m(X::Matrix{Float64})
+        return fill(size(X, 1), β)
     end
     return m
 end
 
 # Creates a linear mean function that returns the dot product of a vector 'x' and the constant β
 function mean_linear(β::Vector{Float64})
-    function m(x::Vector{Float64})
-        @assert length(x) == length(β)
-        return dot(x, β)
+    function m(X::Matrix{Float64})
+        @assert size(X, 1) == length(β)
+        return dot(X, β)
     end
     return m
 end
@@ -135,8 +135,8 @@ end
 function gaussian_process(X, X_star, μ, κ, σ, it)
     Κ_ss = create_cov_matrix(X, κ)
     Κ_xx = create_cov_matrix(X_star, κ, expand = true, dim = it)
-    Κ_cross = create_cross_cov(X, X_star, κ, it)
-    return gp(μ, κ, σ, Κ_ss, (Κ_xx, size(X_star)[1]), (Κ_cross, (size(X_star)[1])))
+    Κ_xs = create_cross_cov(X, X_star, κ, it)
+    return gp(μ, κ, σ, Κ_ss, (Κ_xx, size(X_star)[1]), (Κ_xs, (size(X_star)[1])))
 end
 
 # Calculates and creates the covariance matrix of a given data set. Matrix can be expanded in the future if necessary
@@ -155,7 +155,7 @@ function create_cov_matrix(X, κ; expand = false, dim = 0, σ = 0)
             cov[i, j] = κ(X[i, :], X[j, :])
             cov[j, i] = cov[i, j]
         end
-        cov = cov + σ * identity
+        cov = cov + σ * (Matrix{Float64}(I, row, row)) # There has to be a more efficient way to do this
         return cov
     end
 end
@@ -182,36 +182,37 @@ function upd_cov(X, GP, prev_row, prev_col; X_star = nothing)
         end
         return (Κ_xx, prev_row + 1)
     else 
-        Κ_cross = GP.Κ_cross[1]
+        Κ_xs = GP.Κ_xs[1]
         for i in 1:prev_col
-           Κ_cross[prev_row + 1, i] =  κ(X_star[prev_row + 1, 1:2], X[i])
+           Κ_xs[prev_row + 1, i] =  κ(X_star[prev_row + 1, 1:2], X[i])
         end
-        return (Κ_cross, prev_row + 1)
+        return (Κ_xs, prev_row + 1)
     end
 end
 
-function predict_f(GP::gp, X_star)
+function predict_f(GP::gp, X_star, X)
     Κ_ss = GP.Κ_ss
     Κ_xx = GP.Κ_xx[1]
+    μ = GP.μ_pri
     star_bounds = GP.Κ_xx[2]
-    Κ_cross = GP.Κ_cross[1]
-    cross_bounds = GP.Κ_cross[2]
+    Κ_xs = GP.Κ_xs[1]
+    cross_bounds = GP.Κ_xs[2]
     Κ_xx_v = @view Κ_xx[1:star_bounds, 1:star_bounds]
-    Κ_cross_v = @view Κ_cross[1:cross_bounds[1], 1:size(Κ_cross,2)]
-    y = X_star[:, 3]
+    Κ_xs_v = @view Κ_xs[1:cross_bounds[1], 1:size(Κ_xs,2)]
+    y = X[:, 3]
     L = cholesky(Κ_xx_v)
-    println(y)
-    α = L \ y
-    # println(size(α), " ", size(Κ_xx))
-    μ_star = Κ_cross_v' * α
-    A = inv(L) * Κ_cross_v
+    α = L \ (y - μ(X))
+    μ_star = μ(X_star) + Κ_xs_v' * α
+    A = inv(L) * Κ_xs_v
     Σ_star = Κ_ss - (A' * A)
     println(Σ_star[1, 1])
     σ = sqrt.(diag(Σ_star))
     return (μ_star, σ)
 end
 
-function expected_improvement()
+function expected_improvement(X_star, X, GP::gp; ζ = 0.05)
+    μ,σ = predict_f(GP, X) # Might need to reshape σ
+    f_opt = maximum(X)
 
 end
 
