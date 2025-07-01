@@ -155,7 +155,7 @@ function create_cov_matrix(X, κ; expand = false, dim = 0, σ = 0)
             cov[i, j] = κ(X[i, :], X[j, :])
             cov[j, i] = cov[i, j]
         end
-        cov = cov + σ * (Matrix{Float64}(I, row, row)) # There has to be a more efficient way to do this
+        # cov = cov + σ * (Matrix{Float64}(I, row, row)) # There has to be a more efficient way to do this
         return cov
     end
 end
@@ -205,18 +205,34 @@ function predict_f(GP::gp, X_star, X)
     μ_star = μ(X_star) + Κ_xs_v' * α
     A = inv(L) * Κ_xs_v
     Σ_star = Κ_ss - (A' * A)
-    println(Σ_star[1, 1])
-    σ = sqrt.(diag(Σ_star))
+    σ = diag(Σ_star)
+    for i in size(σ, 1)
+        try
+            σ[i] = sqrt(σ[i])
+        catch DomainError
+            println(σ[i])
+            σ[i] = 1e-3
+        end
+    end
     return (μ_star, σ)
 end
 
 function expected_improvement(X_star, X, GP::gp; ζ = 0.05)
-    μ,σ = predict_f(GP, X) # Might need to reshape σ
-    f_opt = maximum(X)
+    μ,σ = predict_f(GP, X_star, X) # Might need to reshape σ
+    f_opt = maximum(X[:, 3])
 
+    imp = @. (μ - f_opt - ζ)
+    z = imp ./ σ
+    exp_imp =  imp .* cdf.(Ref(Normal()), z) .+ σ .* pdf.(Ref(Normal()), z)
+    return exp_imp
 end
 
-function best_sampling_point()
-
+function best_sampling_point(acq_func, X_star, X, f_obj)
+    samp_pt = findmax(acq_func)
+    xy = X_star[samp_pt[2]]
+    z = f_obj(xy[1], xy[2])
+    val_vec = [xy[1], xy[2],z]
+    vcat(X, val_vec)
+    return val_vec
 end
 
