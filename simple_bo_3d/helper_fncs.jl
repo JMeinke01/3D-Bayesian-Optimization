@@ -8,7 +8,7 @@ struct kernel
     κ   # The kernel function
 end
 
-struct gp
+mutable struct gp
     μ_pri   # Prior mean
     κ       # Kernel function
     σ       # Standard deviation
@@ -155,7 +155,7 @@ function create_cov_matrix(X, κ; expand = false, dim = 0, σ = 0)
             cov[i, j] = κ(X[i, :], X[j, :])
             cov[j, i] = cov[i, j]
         end
-        # cov = cov + σ * (Matrix{Float64}(I, row, row)) # There has to be a more efficient way to do this
+        cov = cov + σ * (Matrix{Float64}(I, row, row)) # There has to be a more efficient way to do this
         return cov
     end
 end
@@ -184,7 +184,7 @@ function upd_cov(X, GP, prev_row, prev_col; X_star = nothing)
     else 
         Κ_xs = GP.Κ_xs[1]
         for i in 1:prev_col
-           Κ_xs[prev_row + 1, i] =  κ(X_star[prev_row + 1, 1:2], X[i])
+           Κ_xs[prev_row + 1, i] =  κ(X[prev_row + 1, 1:2], X_star[i])
         end
         return (Κ_xs, prev_row + 1)
     end
@@ -229,10 +229,11 @@ end
 
 function best_sampling_point(acq_func, X_star, X, f_obj)
     samp_pt = findmax(acq_func)
-    xy = X_star[samp_pt[2]]
+    xy = X_star[(samp_pt[2])[1], :]
     z = f_obj(xy[1], xy[2])
     val_vec = [xy[1], xy[2],z]
-    vcat(X, val_vec)
-    return val_vec
+    X = vcat(X, val_vec')
+    println(size(X))
+    return X
 end
 
