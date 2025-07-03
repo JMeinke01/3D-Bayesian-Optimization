@@ -133,10 +133,11 @@ end
 
 # Creates a new Gaussian Process variable
 function gaussian_process(X, X_star, μ, κ, σ, it)
-    Κ_ss = create_cov_matrix(X, κ)
-    Κ_xx = create_cov_matrix(X_star, κ, expand = true, dim = it)
+    Κ_ss = create_cov_matrix(X_star, κ)
+    Κ_xx = create_cov_matrix(X, κ, expand = true, dim = it)
     Κ_xs = create_cross_cov(X, X_star, κ, it)
-    return gp(μ, κ, σ, Κ_ss, (Κ_xx, size(X_star)[1]), (Κ_xs, (size(X_star)[1])))
+    last_row = size(X)[1]
+    return gp(μ, κ, σ, Κ_ss, (Κ_xx, last_row), (Κ_xs, last_row))
 end
 
 # Calculates and creates the covariance matrix of a given data set. Matrix can be expanded in the future if necessary
@@ -147,6 +148,9 @@ function create_cov_matrix(X, κ; expand = false, dim = 0, σ = 0)
         for i in 1:row, j in i:row
             cov[i, j] = κ(X[i, 1:2], X[j, 1:2])
             cov[j, i] = cov[i, j]
+            if i == j
+                cov[i, j] = cov[i, j] + 1e-6 # Add a jitter term for numerical stability
+            end
         end
         return cov
     else
@@ -162,11 +166,11 @@ end
 
 # Creates the non-symmetric cross covariance matrix
 function create_cross_cov(X, X_star, κ, budget)
-    rows = size(X_star)[1]
-    cols = size(X)[1]
+    rows = size(X)[1]
+    cols = size(X_star)[1]
     cov = zeros(budget, cols)
     for i in 1:rows, j in 1:cols
-        cov[i, j] = κ(X_star[i, 1:2], X[j, :])
+        cov[i, j] = κ(X[i, 1:2], X_star[j, :])
     end
     return cov
 end
@@ -176,15 +180,17 @@ function upd_cov(X, GP, prev_row, prev_col; X_star = nothing)
     κ = GP.κ
     if (X_star === nothing)
         Κ_xx = GP.Κ_xx[1]
-        for i in 1:prev_col
-            Κ_xx[prev_row + 1, i] = κ(X[prev_row + 1, 1:2], X[i, 1:2])
-            Κ_xx[i, prev_col + 1] = κ(X[prev_row + 1, 1:2], X[i, 1:2])
+        for i in 1:(prev_col + 1)
+            val = κ(X[prev_row + 1, 1:2], X[i, 1:2])
+            Κ_xx[prev_row + 1, i] = val
+            Κ_xx[i, prev_col + 1] = val
         end
+        Κ_xx[prev_row + 1, prev_col + 1] = Κ_xx[prev_row + 1, prev_col + 1] + 1e-6 # Add jitter for numerical stability
         return (Κ_xx, prev_row + 1)
     else 
         Κ_xs = GP.Κ_xs[1]
         for i in 1:prev_col
-           Κ_xs[prev_row + 1, i] =  κ(X[prev_row + 1, 1:2], X_star[i])
+            Κ_xs[prev_row + 1, i] =  κ(X[prev_row + 1, 1:2], X_star[i, :])
         end
         return (Κ_xs, prev_row + 1)
     end
@@ -193,13 +199,15 @@ end
 function predict_f(GP::gp, X_star, X)
     Κ_ss = GP.Κ_ss
     Κ_xx = GP.Κ_xx[1]
-    μ = GP.μ_pri
-    star_bounds = GP.Κ_xx[2]
     Κ_xs = GP.Κ_xs[1]
+    μ = GP.μ_pri
+    x_bounds = GP.Κ_xx[2]
     cross_bounds = GP.Κ_xs[2]
-    Κ_xx_v = @view Κ_xx[1:star_bounds, 1:star_bounds]
+    Κ_xx_v = @view Κ_xx[1:x_bounds, 1:x_bounds]
     Κ_xs_v = @view Κ_xs[1:cross_bounds[1], 1:size(Κ_xs,2)]
     y = X[:, 3]
+    # println(size(Κ_xx_v))
+    # println(Κ_xx_v)
     L = cholesky(Κ_xx_v)
     α = L \ (y - μ(X))
     μ_star = μ(X_star) + Κ_xs_v' * α
@@ -207,21 +215,16 @@ function predict_f(GP::gp, X_star, X)
     Σ_star = Κ_ss - (A' * A)
     σ = diag(Σ_star)
     for i in size(σ, 1)
-        try
-            σ[i] = sqrt(σ[i])
-        catch DomainError
-            println(σ[i])
-            σ[i] = 1e-3
-        end
+        σ[i] = sqrt(σ[i])
     end
     return (μ_star, σ)
 end
 
 function expected_improvement(X_star, X, GP::gp; ζ = 0.05)
     μ,σ = predict_f(GP, X_star, X) # Might need to reshape σ
-    f_opt = maximum(X[:, 3])
+    f_opt = minimum(X[:, 3])
 
-    imp = @. (μ - f_opt - ζ)
+    imp = @. (f_opt - μ - ζ)
     z = imp ./ σ
     exp_imp =  imp .* cdf.(Ref(Normal()), z) .+ σ .* pdf.(Ref(Normal()), z)
     return exp_imp
@@ -233,7 +236,7 @@ function best_sampling_point(acq_func, X_star, X, f_obj)
     z = f_obj(xy[1], xy[2])
     val_vec = [xy[1], xy[2],z]
     X = vcat(X, val_vec')
-    println(size(X))
+    # println(size(X))
     return X
 end
 
